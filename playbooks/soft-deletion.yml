@@ -1,0 +1,117 @@
+---
+- name: Soft delete de Managed Host en AAP
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    # Credenciales inyectadas por AAP
+    controller_username: "{{ lookup('env', 'CONTROLLER_USERNAME') }}"
+    controller_password: "{{ lookup('env', 'CONTROLLER_PASSWORD') }}"
+    controller_token: "{{ lookup('env', 'CONTROLLER_OAUTH_TOKEN') }}"
+
+  tasks:
+
+    - name: Validar variables ingresadas por Survey
+      ansible.builtin.assert:
+        that:
+          - aap_url is defined
+          - aap_url | length > 0
+          - hostname_delete is defined
+          - hostname_delete | length > 0
+        fail_msg: >
+          Debe especificar la URL de AAP y el hostname que desea eliminar.
+
+    - name: Normalizar URL
+      ansible.builtin.set_fact:
+        aap_base_url: "{{ aap_url | regex_replace('/+$', '') }}"
+
+    # -------------------------------------------------------
+    # Buscar el Host Metric
+    # -------------------------------------------------------
+
+    - name: Buscar Host Metric
+      ansible.builtin.uri:
+        url: >-
+          {{ aap_base_url }}/api/controller/v2/host_metrics/?hostname={{ hostname_delete | urlencode }}
+        method: GET
+
+        headers:
+          Authorization: "Bearer {{ controller_token }}"
+
+        validate_certs: false
+        return_content: true
+        status_code: 200
+      register: host_search
+      no_log: false
+
+    # -------------------------------------------------------
+    # Validaciones
+    # -------------------------------------------------------
+
+    - name: Validar que el host exista
+      ansible.builtin.assert:
+        that:
+          - host_search.json.count | int > 0
+        fail_msg: >
+          No se encontró el host '{{ hostname_delete }}'
+          en Host Metrics.
+
+    - name: Validar que exista solamente un resultado
+      ansible.builtin.assert:
+        that:
+          - host_search.json.count | int == 1
+        fail_msg: >
+          Se encontraron {{ host_search.json.count }}
+          registros para '{{ hostname_delete }}'.
+          No se realizará ninguna eliminación por seguridad.
+
+    # -------------------------------------------------------
+    # Obtener información
+    # -------------------------------------------------------
+
+    - name: Obtener ID del Host Metric
+      ansible.builtin.set_fact:
+        host_metric_id: "{{ host_search.json.results[0].id }}"
+
+    - name: Mostrar host encontrado
+      ansible.builtin.debug:
+        msg:
+          - "Host encontrado"
+          - "Hostname: {{ hostname_delete }}"
+          - "Host Metric ID: {{ host_metric_id }}"
+          - "Last Automation: {{ host_search.json.results[0].last_automation | default('N/A') }}"
+
+    # -------------------------------------------------------
+    # Soft Delete
+    # -------------------------------------------------------
+
+    - name: Ejecutar Soft Delete
+      ansible.builtin.uri:
+        url: >-
+          {{ aap_base_url }}/api/controller/v2/host_metrics/{{ host_metric_id }}/
+        method: DELETE
+
+        headers:
+          Authorization: "Bearer {{ controller_token }}"
+
+        validate_certs: false
+        status_code:
+          - 200
+          - 202
+          - 204
+      register: delete_result
+
+    # -------------------------------------------------------
+    # Resultado
+    # -------------------------------------------------------
+
+    - name: Mostrar resultado
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "SOFT DELETE COMPLETADO"
+          - "=========================================="
+          - "Host: {{ hostname_delete }}"
+          - "Host Metric ID: {{ host_metric_id }}"
+          - "HTTP Status: {{ delete_result.status }}"
+          - "=========================================="
