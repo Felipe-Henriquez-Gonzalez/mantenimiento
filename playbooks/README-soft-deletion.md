@@ -1,3 +1,6 @@
+El Playbook de soft-deletion debera contener los siguientes variables, que pueden ser inyectadas mediante Survey o mediante una credencial
+
+
 | Dato            | Origen         | Variable                 |
 | --------------- | -------------- | ------------------------ |
 | URL AAP         | Survey         | `aap_url`                |
